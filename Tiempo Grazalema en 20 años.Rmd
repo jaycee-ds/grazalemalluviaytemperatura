@@ -1,0 +1,585 @@
+---
+title: "Estudio de las precipitaciones y las temperaturas en Grazalema de 2001 a 2020"
+output: html_notebook
+---
+A continuación haré un estudio de las precipitaciones y de las temperaturas en el período de 1 de enero de 2001 a 15 de septiembre de 2020 según los datos recogidos por la estación meteorológica de la AEMET en Grazalema. La Sierra de Grazalema (Cádiz) es uno de mis sitios favoritos. La idea de hacer este proyecto surge de querer indagar en los datos para comprender si el cambio climático ha tenido algún efecto que pueda ver en el siguiente estudio.
+
+```{r, results='hide'}
+library(jsonlite)
+library(dplyr)
+library(zoo)
+library(xts)
+library(lubridate)
+library(ggplot2)
+```
+Lo primero que haremos, una vez descargados los datos de la AEMET, será preprocesarlos para que podamos trabajar con ellos posteriormente sin ningún problema de formato, orden, valores nulos, etc.
+
+## Preprocesamiento de los datos
+
+```{r}
+# leemos los ficheros json
+jdata_01_05 <- "Tiempo Grazalema 2000-05.json"
+jdata_05_10 <- "Tiempo Grazalema 05-10.json"
+jdata_10_15 <- "Tiempo Grazalema 10-15.json"
+jdata_15_20 <- "Tiempo Grazalema 15-20.json"
+# convertimos a df
+data_1 <- fromJSON(jdata_01_05)
+data_2 <- fromJSON(jdata_05_10)
+data_3 <- fromJSON(jdata_10_15)
+data_4 <- fromJSON(jdata_15_20)
+# eliminamos las columnas que no nos interesan
+data_2 <- select(data_2, -c(16:19))
+data_3 <- select(data_3, -c(16:19))
+data_4 <- select(data_4, -c(16:19))
+# unimos todas las filas para obtener el df final
+df <- rbind(data_1, data_2, data_3, data_4)
+```
+
+Vemos que las variables de nuestro marco de datos son todas de tipo caracter, cuando en realidad tenemos tenemos que trabajar con fechas y tipo numérico (precipitaciones y temperaturas)
+```{r}
+# vamos a ver los tipos de datos de cada columna
+summary(df)
+```
+```{r}
+# vamos a tratar con los valores nulos
+print(paste("En precipitaciones tenemos un total de NA de:", sum(is.na(df$prec))))
+print(paste("En temp. media tenemos un total de NA de:", sum(is.na(df$tmed))))
+print(paste("En temp. máx. tenemos un total de NA de:", sum(is.na(df$tmax))))
+print(paste("En temp. mín. tenemos un total de NA de:", sum(is.na(df$tmin))))
+```
+```{r}
+# reemplazar valores nulos
+# precipitación por 0
+# temperatura media, máxima y mínima por el valor del día anterior
+df$prec[is.na(df$prec)] <- 0
+df$tmed <- na.locf(df$tmed)
+df$tmax <- na.locf(df$tmax)
+df$tmin <- na.locf(df$tmin)
+```
+
+```{r}
+df$fecha <- as.Date(df$fecha)
+df$prec <- as.numeric(gsub(",", ".", df$prec))
+df$tmed <- as.numeric(gsub(",", ".", df$tmed))
+df$tmax <- as.numeric(gsub(",", ".", df$tmax))
+df$tmin <- as.numeric(gsub(",", ".", df$tmin))
+# el problema estaba en las comas de los números
+# eliminamos la coma y convertimos a tipo numérico
+```
+
+```{r}
+# podría crear un df con las columnas que me interesan solamente
+grazalema <- df %>%
+  select(`fecha`, `prec`, `tmed`, `tmax`, `tmin`)
+```
+
+## Precipitaciones
+
+```{r}
+precipitaciones <- xts(grazalema$prec, order.by = grazalema$fecha, frequency = 365, start = c(2001, 1))
+```
+
+Una primera representación gráfica de las precipitaciones diarias. Vemos un punto atípico de finales de 2019 que corresponde efectivamente al día 20 de deciembre de 2019, con la mayor lluvia registrada en el período de estudio.
+```{r}
+ggplot(precipitaciones, aes(x = Index, y = data)) +
+  geom_point(color = "purple") +
+  labs(title = "Precipitación en Grazalema",
+       subtitle = "Precipitaciones a lo largo de 20 años en la sierra de Cádiz",
+       x = "Fecha",
+       y = "Precipitaciones diarias (mm)") + 
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+```
+
+Lo primero que me llama la atención al ver las precipitaciones medias por meses es que, además de ver claramente los años más lluviosos y los más secos, es que parece haber un ciclo de 3-4 años más lluviosos, 2-3 años más secos, y vuelta a empezar.
+```{r}
+# agrupamos por mes y calculamos precipitaciones medias
+prec_mensuales <- apply.monthly(precipitaciones, mean)
+
+ggplot(prec_mensuales, aes(x=Index, y=data)) +
+  geom_line(color = "purple") +
+  labs(title = "Precipitación mensual media en Grazalema",
+       x = "Fecha",
+       y = "Precipitaciones mensuales (mm)") + 
+  scale_x_date(date_labels = "%Y", date_breaks = "1 year") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+```
+
+A continuación vemos la descomposición de las precipitaciones mensuales por años.
+```{r, fig.height=7, fig.width=10}
+# hacer un facet wrap para cada año
+# primero tengo que crear una columna con años para poder agrupar
+grazalema$año <- as.numeric(format(grazalema$fecha, "%Y"))
+grazalema$mes <- as.numeric(format(grazalema$fecha, "%m"))
+
+g <- grazalema %>%
+  group_by(`mes`, `año`) %>%
+  summarise(prec_media = mean(`prec`))
+
+g %>%
+  ggplot(aes(x = mes, y = prec_media)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  facet_wrap(~ año, ncol = 4) +
+  labs(title = "Precipitación media mensual para cada año - Grazalema",
+       x = "Mes",
+       y = "Precipitación media (mm)") +
+  scale_x_continuous(breaks = c(1,3,6,9,12)) + theme_bw(base_size = 13)
+```
+
+```{r}
+print(paste("El día que más ha llovido en nuestro registro de 20 años ha sido", grazalema[which.max(grazalema$prec),"fecha"]))
+```
+
+Aquí vemos que, en promedio, el mes más lluvioso es enero y el más seco es julio.
+```{r}
+mes_mas_lluvioso <- g %>%
+  group_by(`mes`) %>%
+  summarise(prec_media_meses = mean(`prec_media`))
+
+ggplot(mes_mas_lluvioso, aes(x = mes, y = prec_media_meses)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  labs(title = "Mes más lluvioso y más seco en promedio",
+       x = "Mes",
+       y = "Precipitación media (mm)") + scale_x_continuous(breaks = c(1,3,6,9,12)) + theme_bw()
+```
+
+Veamos las precipitaciones acumuladas por año. 2009 fue el año que más precipitaciones acumuló, seguido de 2018. El año más seco fue 2005.
+```{r}
+año_mas_lluvioso <- grazalema %>%
+  group_by(`año`) %>%
+  summarise(prec_acum_año = sum(`prec`))
+
+ggplot(año_mas_lluvioso, aes(x = año, y = prec_acum_año)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  labs(title = "Precipitación acumulada por año",
+       x = "Año",
+       y = "Precipitación acumulada (mm)") +
+  scale_x_continuous(breaks = 2001:2020) + theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Igualmente, vemos un valle en el año 2005, seguido del pico de 2009. Las variaciones en los años posteriores han sido más constantes.
+```{r}
+prec_anuales_medias <- grazalema %>%
+  group_by(`año`) %>%
+  summarise(prec_media_años = mean(`prec`))
+
+ggplot(prec_anuales_medias, aes(x=año, y=prec_media_años)) +
+  geom_line(color="purple", size=1.5) +
+  ylim(1,10) +
+  labs(title = "Precipitación media anual",
+       x = "Año",
+       y = "Precipitación media (mm)") +
+  theme_bw()
+```
+
+La línea de tendencia (en negro) muestra los ciclos de los que hemos hablado anteiormente.
+```{r, fig.height=5, fig.width=10}
+ggplot(prec_mensuales, aes(x=Index, y=data)) +
+  geom_line(color = "purple") +
+  geom_line(aes(y=rollmean(data, 12, fill=NA)), size=1) +
+  labs(title = "Precipitación mensual media en Grazalema",
+       subtitle = "Con media móvil a 12 meses",
+       x = "Fecha",
+       y = "Precipitaciones mensuales (mm)") + 
+  scale_x_date(date_labels = "%Y", date_breaks = "1 year") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+```
+
+Vamos a proceder con la descomposición de la serie temporal (tendencia, componente estacional y componente aleatoria) para ver la serie desestacionalizada y construir el modelo de predicción finalmente.
+```{r}
+# cambiamos el atributo frequency
+attr(prec_mensuales, 'frequency') <- 12
+
+# convertir a ts y descomponer
+prec_componentes <- decompose(as.ts(prec_mensuales))
+
+# graficar
+plot(prec_componentes)
+```
+
+```{r}
+prec_mensuales <- as.ts(prec_mensuales)
+prec_mensuales_desest <- prec_mensuales - prec_componentes$seasonal
+
+plot(prec_mensuales_desest, main="Precipitaciones medias mensuales desestacionalizadas \nen la Sierra de Grazalema de 2001 a 2020", col="purple")
+```
+
+La función de autocorrelación nos muestra 1 retardo significativo (2 retardos en realidad, pero sobre todo el primero es significativo).
+```{r}
+# Funciones de autocorrelación
+acf(ts(prec_mensuales, frequency = 1))
+```
+
+```{r}
+acf(prec_mensuales, plot = FALSE)
+```
+
+La función de autocorrelación parcial nos indica un retardo significativo.
+```{r}
+pacf(ts(prec_mensuales, frequency = 1))
+```
+
+```{r}
+pacf(prec_mensuales, plot=FALSE)
+```
+
+```{r}
+# la estacionariedad es un requisito
+# pacf nos dice los AR (autorregresivos) y acf los MA (medias móviles)
+```
+
+Definimos un modelo ARMA con una variable autorregresiva y una de media móvil.
+```{r}
+# modelo arima
+modelo1_prec <- arima(prec_mensuales, order=c(1,0,1))
+modelo1_prec
+```
+
+```{r, fig.height=7, fig.width=10}
+tsdiag(modelo1_prec)
+# ljung > .05 significa que hay ruido blanco y nuestro modelo se ajusta bien
+```
+
+El valor p del test de Box-Ljung es > .05 por lo tanto existe ruido blanco y el modelo se ajusta bien. 
+```{r}
+Box.test(residuals(modelo1_prec), type = "Ljung-Box")
+# p-value > .05 hay ruido blanco
+# media error = 0 var constante y errores no correlacionados
+```
+
+Los errores tienen media 0 y varianza constante.
+```{r}
+# errores
+error = residuals(modelo1_prec)
+plot(error)
+```
+
+```{r}
+# pronosticar
+pronostico1 <- forecast::forecast(modelo1_prec, h = 60)
+pronostico1
+```
+
+Graficamos el pronóstico para los próximos 5 años. Intervalos de confianza del 80% y del 95%.
+```{r}
+plot(pronostico1, col = "purple", main = "Predicción de precipitaciones medias para los próximos 5 años")
+```
+
+```{r}
+modelo2_prec <- arima(prec_mensuales, order = c(0,0,1))
+modelo2_prec
+# AIC un poco más alto que el modelo 1
+```
+
+```{r}
+mejor_modelo_prec <- forecast::auto.arima(prec_mensuales)
+mejor_modelo_prec
+# el mejor modelo es este, un SARIMA, según el ajuste automático
+```
+
+```{r}
+pronostico_prec <- forecast::forecast(mejor_modelo_prec, h = 60)
+pronostico_prec
+```
+
+Una vez hemos dejado que la función de auto arima nos devuelva un modelo ajustado automáticamente, nos quedamos con este, y realizamos el pronóstico para los próximos 5 años. En los próximos meses pronosticamos un aumento, como se espera de los meses de invierno. Posteriormente esperamos situarnos en una media de 4,7 mm como vemos en el cuadro de arriba. Los intervalos de confianza son del 80% (sombra azul) y del 95% (sombra gris).
+```{r}
+plot(pronostico_prec, col="purple", main="Predicción de precipitaciones medias para los próximos 5 años")
+```
+
+```{r}
+Box.test(residuals(mejor_modelo_prec), type = "Ljung-Box")
+```
+
+Igualmente, vemos media de errores igual a 0 y varianza constante, gráficamente.
+```{r}
+# vemos si los errores del modelo se mueven en torno a 0
+error <- residuals(mejor_modelo_prec)
+plot(error)
+```
+
+## Temperatura
+
+Vamos a realizar un estudio de la temperatura media, máxima, mínima y la diferencia entre máximas y mínimas que denominaremos rango de temperatura.
+
+```{r}
+# me interesa ver también el rango de temperatura
+# creo una nueva columna
+grazalema$rango_temperatura <- grazalema$tmax - grazalema$tmin
+
+# vamos a crear objetos ts para las variables que nos interesan
+temp_media <- ts(grazalema$tmed, frequency = 365, start = c(2001, 1))
+temp_max <- ts(grazalema$tmax, start = c(2001, 1), frequency = 365)
+temp_min <- ts(grazalema$tmin, start = c(2001, 1), frequency = 365)
+rango_temp <- ts(grazalema$rango_temperatura, start = c(2001, 1), frequency = 365)
+```
+
+Algunos datos interesantes:
+```{r}
+print(paste("La temperatura media en Grazalema es de", mean(grazalema$tmed), "grados centígrados"))
+print(paste("La temperatura máxima alcanzada en los últimos 20 años es de", max(grazalema$tmax), "grados"))
+print(paste("La temperatura mínima registrada en los últimos 20 años es de", min(grazalema$tmin), "grados"))
+print(paste("La mayor diferencia entre máximas y mínimas registrada en un día es de", max(grazalema$rango_temperatura), "grados"))
+```
+
+Graficamos la temperatura media mensual. Observamos claramente los picos y valles correspondientes a los veranos e inviernos, respectivamente.
+```{r}
+# agrupamos tmed por mes
+temp_media_mensual <- apply.monthly(xts(grazalema$tmed, order.by = grazalema$fecha), mean)
+
+ggplot(temp_media_mensual, aes(x=Index, y=data)) +
+         geom_line(color = "darkblue") +
+         labs(title = "Temperatura media mensual en Grazalema",
+              x = "Fecha",
+              y = "Temperatura media (ºC)") +
+         scale_x_date(date_labels = "%Y", date_breaks = "1 year") +
+         theme_bw() +
+         theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+```
+
+Descomponemos las medias mensuales por año. La distribución es muy similar.
+```{r, fig.height=7, fig.width=10}
+g <- grazalema %>%
+  group_by(`mes`, `año`) %>%
+  summarise(temp_media = mean(`tmed`))
+
+g %>%
+  ggplot(aes(x = mes, y = temp_media)) +
+  geom_bar(stat = "identity", fill = "darkblue") +
+  facet_wrap(~ año, ncol = 4) +
+  labs(title = "Temperatura media mensual por año en Grazalema",
+       x = "Mes",
+       y = "Temperatura media (ºC)") +
+  scale_x_continuous(breaks = c(1,3,6,9,12)) + theme_bw(base_size = 13)
+```
+
+La temperatura media anual tiene una ligera tendencia al alza.
+```{r}
+temp_media_anual <- grazalema %>%
+  group_by(`año`) %>%
+  summarise(temp_media_año = mean(`tmed`))
+
+ggplot(temp_media_anual, aes(x=año, y=temp_media_año)) +
+  geom_line(color="darkblue", size=1.5) +
+  geom_line(aes(y=rollmean(temp_media_año, 5, fill = NA)), size=1, color="orange") +
+  ylim(10,20) +
+  labs(title = "Temperatura media anual",
+       subtitle = "Media móvil a 5 años",
+       x = "Año",
+       y = "Temperatura (ºC)") +
+  theme_bw()
+```
+
+En promedio, el mes más frío es enero y el más cálido es agosto.
+```{r}
+mes_mas_calido_frio <- g %>%
+  group_by(`mes`) %>%
+  summarise(temp_media_meses = mean(`temp_media`))
+
+ggplot(mes_mas_calido_frio, aes(x = mes, y = temp_media_meses)) +
+  geom_bar(stat = "identity", fill = "darkblue") +
+  labs(title = "Mes más cálido y frío en promedio en los últimos 20 años",
+       x = "Mes",
+       y = "Temperatura media (ºC)") + scale_x_continuous(breaks = c(1,3,6,9,12)) + theme_bw()
+```
+
+
+```{r, fig.width=12}
+autoplot(temp_media, color="darkblue", main="Temperatura media diaria en Grazalema")
+```
+
+
+```{r}
+# descomponemos la serie temporal
+temp_media_componentes <- decompose(temp_media)
+plot(temp_media_componentes)
+```
+
+```{r, fig.width=12}
+temp_media_des <- temp_media - temp_media_componentes$seasonal
+autoplot(temp_media_des, main="Temperatura media diaria desestacionalizada en la Sierra de Grazalema en los últimos 20 años", color="darkblue")
+```
+
+Comprobamos la estacionariedad de la serie antes de construir el modelo para las temperaturas medias. El valor p es <.05 indica que la serie es estacionaria.
+```{r}
+# dickey fuller test para estacionariedad
+tseries::adf.test(temp_media)
+```
+
+La oscilación de la función de autocorrelación indica un modelo autorregresivo.
+```{r}
+acf(ts(temp_media, frequency = 1), lag.max = 365)
+# parece que podría ser un modelo autorregresivo
+# adf test para estacionariedad sale <.05 hay estacionariedad
+```
+
+```{r}
+pacf(ts(temp_media, frequency = 1))
+```
+
+```{r}
+modelo1_tmed <- forecast::Arima(temp_media, order = c(1,0,0))
+modelo1_tmed
+```
+
+```{r}
+modelo2_tmed <- forecast::Arima(temp_media, order = c(2,0,0))
+modelo2_tmed
+```
+
+```{r}
+modelo3_tmed <- forecast::Arima(temp_media, order = c(3,0,0))
+modelo3_tmed
+```
+```{r}
+modelo4_tmed <- forecast::Arima(temp_media, order = c(10,0,0))
+modelo4_tmed
+# 10 variables autorregresivas según lags significativos en pacf
+```
+```{r}
+modelo_temp_media_auto <- forecast::auto.arima(temp_media, stationary = T, seasonal = T)
+modelo_temp_media_auto
+```
+
+Hemos seguido el mismo procedimiento para estimar los parámetros del modelo que hicimos con las precipitaciones. Finalmente, hacemos una estimación automática con la función auto arima y escogemos este modelo para hacer la predicción. 
+
+Vemos la disminución de temperaturas medias para los próximos meses como es de esperar en los meses de invierno y la media estimada posteriormente con intervalos de confianza del 80% y 95%.
+```{r}
+# vamos a quedarnos de momento con el modelo automático
+pronostico_tmed <- forecast::forecast(modelo_temp_media_auto, h = 730)
+plot(pronostico_tmed, col="darkblue", main="Predicción de temperaturas medias para los próximos 2 años")
+```
+
+```{r}
+Box.test(residuals(modelo_temp_media_auto), type = "Ljung-Box")
+```
+
+```{r}
+error <- residuals(modelo_temp_media_auto)
+plot(error)
+```
+
+La máximas en rojo y las mínimas en verde no nos indican ciclos claramente (si los hubiera).
+```{r, fig.width=12}
+# temperaturas máximas y mínimas
+ggplot(grazalema, aes(x=fecha, y=tmax)) +
+  geom_area(fill="#EE5315") +
+  geom_area(aes(y=tmin), fill="#15EEAC") +
+  labs(title = "Temperaturas máximas y mínimas diarias",
+       subtitle = "Sierra de Grazalema",
+       x = "Años",
+       y = "Temperatura (ºC)") + 
+  theme_bw()
+```
+
+Las máximas y mínimas en promedio mes a mes hacen más fácil ver ciertos ciclos. Las máximas parecen tener ciclos de unos 7-8 años, en los que crecen y decrecen lentamente. Fijémonos en los picos de máximas (rojo) en el periodo de 2001 a 2008 y 2009 a 2015, por ejemplo. Los valores más altos dentro de las mínimas siguen el mismo ciclo. A partir de 2015 no parece seguirse el mismo ciclo. Al menos, no es tan fácilmente visible con nuestro gráfico. Parece que las máximas se mantienen más estables y más altas (al nivel de los picos de los ciclos que hemos comentado).
+```{r, fig.width=12}
+# agrupamos por mes para hacerlo un poco más visual
+temp_max_mensual <- apply.monthly(xts(grazalema$tmax, order.by = grazalema$fecha), mean)
+temp_min_mensual <- apply.monthly(xts(grazalema$tmin, order.by = grazalema$fecha), mean)
+
+ggplot(temp_max_mensual, aes(x=Index, y=data)) +
+  geom_area(fill = "#EE5315") +
+  geom_area(aes(y=temp_min_mensual), fill="#15EEAC") +
+  labs(title = "Temperaturas máximas y mínimas en promedio por mes",
+              x = "Años",
+              y = "Temperatura media (ºC)") +
+         scale_x_date(date_labels = "%Y", date_breaks = "1 year") +
+         theme_bw() +
+         theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+```
+
+Los rangos más amplios de temperatura (diferencia entre máximas y mínimas) se producen en verano y los rangos más estrechos en invierno.
+```{r, fig.width=12}
+ggplot(grazalema, aes(x=fecha, y=rango_temperatura)) +
+  geom_area(fill="#15D7EE") +
+  labs(title = "Rango de temperaturas diarias",
+       subtitle = "Diferencia entre temperaturas máximas y mínimas",
+       x="Años",
+       y="Temperatura (ºC)") +
+  theme_bw()
+```
+
+Vamos a construir un modelo de predicción para las temperaturas medias anuales
+```{r}
+temp_media_anual <- temp_media_anual[-20,]
+temp_media_anual <- ts(temp_media_anual$temp_media_año, start = 2001, frequency = 1)
+tseries::adf.test(temp_media_anual)
+```
+
+El test de Dickey-Fuller nos indica que es una serie no estacionaria (como podíamos ver gráficamente más arriba)
+```{r}
+temp_media_anual_dif <- diff(temp_media_anual, differences = 1)
+tseries::adf.test(temp_media_anual_dif)
+```
+
+Aún no conseguimos estacionariedad, por lo que debemos hacer otra diferenciación.
+```{r}
+temp_media_anual_dif2 <- diff(temp_media_anual, differences = 2)
+tseries::adf.test(temp_media_anual_dif2)
+```
+
+Con tres diferencias hemos conseguido valor p <.05
+```{r}
+temp_media_anual_dif3 <- diff(temp_media_anual, differences = 3)
+tseries::adf.test(temp_media_anual_dif3)
+```
+
+```{r}
+plot(temp_media_anual_dif3, main="Temperatura media anual - serie estacionaria 3 diferencias")
+```
+
+```{r, fig.height=7}
+par(mfrow=c(2,1), mar=c(4,4,4,1)+.1)
+acf(temp_media_anual_dif3)
+pacf(temp_media_anual_dif3)
+```
+
+Introducimos los parámetros que necesitamos en nuestro modelo ARIMA:
+```{r}
+modelo_temp_media_anual <- forecast::Arima(temp_media_anual, order = c(1,3,1))
+modelo_temp_media_anual
+```
+
+```{r}
+tsdiag(modelo_temp_media_anual)
+```
+
+Vemos que hay ruido blanco con el estadístico de Ljung-Box, valor p >.05
+```{r}
+Box.test(residuals(modelo_temp_media_anual), type = "Ljung-Box")
+```
+
+
+```{r}
+error <- residuals(modelo_temp_media_anual)
+plot(error)
+```
+
+```{r}
+pronostico_tanual <- forecast::forecast(modelo_temp_media_anual, h = 5)
+pronostico_tanual
+```
+
+Aunque veíamos más arriba la línea de tendencia al alza, nuestro modelo de pronóstico calcula una tendencia a la baja en los próximos 5 años, como podemos ver a continuación (ojo a los intervalos de confianza):
+```{r}
+plot(pronostico_tanual, col = "darkblue", main = "Pronóstico de temperatura media anual para 5 años")
+```
+
+## Conclusiones
+
+Los cambios que se puedan producir en las variables climatológicas debido al cambio climático pueden ser más notorios en unas partes del mundo que en otras. En cualquier caso, sería un error pensar que iban a ser demasiado evidentes en el periodo de 20 años. Aun así, puedo llegar a conclusiones interesantes:
+
+- Las precipitaciones parecen describir un ciclo (obviamente imperfecto) en el que se producen años más lluviosos en el periodo de 3-4 años y años más secos en el periodo sucesivo de 2-3 años. Y volvería a empezar el ciclo.
+- Las temperaturas máximas siguen un comportamiento similar, aunque en ciclos más largos de unos 6-8 años.
+- En el último lustro, bien parece ser que el ciclo no lleva el mismo camino de producirse o bien el ciclo se hace más corto para ambas variables estudiadas.
+- Me ha parecido especialmente interesante observar la tendencia en las temperaturas medias anuales. En los últimos 10 años, la tendencia es creciente.
+
+Lo que hemos observado parece seguir la línea que nos advierten los expertos en cuanto al cambio climático. Haría falta un estudio más en profundidad y contar con conocimientos más profundos de meteorología y climatología para evaluar las conclusiones y obtener otras nuevas. Queda en el aire modificar o alcanzar nuevas conclusiones a medida que mi conocimiento en el estudio de series temporales vaya avanzando. 
+
+Ha sido un estudio largo y bonito de realizar, con datos reales y sobre una de las zonas que más me gusta visitar. La Sierra de Grazalema está considerada (según quién lo mire), la zona más lluviosa de España. Otros dicen que es Galicia. No tengo datos en este momento para afirmar una u otra cosa, pero podría ser objeto de un futuro proyecto.
+
+
+
