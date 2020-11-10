@@ -1,6 +1,6 @@
 ---
 title: "Estudio de las precipitaciones y las temperaturas en Grazalema de 2001 a 2020"
-output: github_document
+output: html_notebook
 ---
 A continuación haré un estudio de las precipitaciones y de las temperaturas en el período de 1 de enero de 2001 a 15 de septiembre de 2020 según los datos recogidos por la estación meteorológica de la AEMET en Grazalema. La Sierra de Grazalema (Cádiz) es uno de mis sitios favoritos. La idea de hacer este proyecto surge de querer indagar en los datos para comprender si el cambio climático ha tenido algún efecto que pueda ver en el siguiente estudio.
 
@@ -18,10 +18,10 @@ Lo primero que haremos, una vez descargados los datos de la AEMET, será preproc
 
 ```{r}
 # leemos los ficheros json
-jdata_01_05 <- "/Users/JuanCarlos/Documents/PROYECTOS programación-data science/Tiempo Grazalema/Tiempo Grazalema 2000-05.json"
-jdata_05_10 <- "/Users/JuanCarlos/Documents/PROYECTOS programación-data science/Tiempo Grazalema/Tiempo Grazalema 05-10.json"
-jdata_10_15 <- "/Users/JuanCarlos/Documents/PROYECTOS programación-data science/Tiempo Grazalema/Tiempo Grazalema 10-15.json"
-jdata_15_20 <- "/Users/JuanCarlos/Documents/PROYECTOS programación-data science/Tiempo Grazalema/Tiempo Grazalema 15-20.json"
+jdata_01_05 <- "*/Tiempo Grazalema 2000-05.json"
+jdata_05_10 <- "*/Tiempo Grazalema 05-10.json"
+jdata_10_15 <- "*/Tiempo Grazalema 10-15.json"
+jdata_15_20 <- "*/Tiempo Grazalema 15-20.json"
 # convertimos a df
 data_1 <- fromJSON(jdata_01_05)
 data_2 <- fromJSON(jdata_05_10)
